@@ -7,6 +7,8 @@
 //
 
 #include <iostream>
+#include <thread>
+#include <vector>
 #include <Eigen/Dense>
 #include <SDL2/SDL.h>
 #include <SDL2_ttf/SDL_ttf.h>
@@ -47,10 +49,7 @@ int worldMap[mapWidth][mapHeight]=
     {1,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
 };
-
-void printText(std::string& text, SDL_Renderer *renderer, SDL_Rect *rect) {
-    
-}
+void drawLine(SDL_Renderer *renderer, int x, Vector2f &pos, Vector2f &dir, Vector2f &viewPlane);
 
 int main(int argc, const char * argv[]) {
     // insert code here...
@@ -80,7 +79,7 @@ int main(int argc, const char * argv[]) {
     }
     atexit(TTF_Quit);
     
-    TTF_Font *font = TTF_OpenFont(FONT_NAME, 16);
+    TTF_Font *font = TTF_OpenFont(FONT_NAME, 70);
     if (!font) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't load font file [%s]: %s", FONT_NAME, TTF_GetError());
         SDL_DestroyRenderer(renderer);
@@ -88,7 +87,7 @@ int main(int argc, const char * argv[]) {
         exit(EXIT_FAILURE);
     }
     
-    SDL_Color textColor = {0xFF, 0xFF, 0xFF, 0x00};
+    SDL_Color textColor = {0xFF, 0x00, 0x00, 0xFF};
     SDL_Surface *textSurface;
     textSurface = TTF_RenderText_Solid(font, "Testing", textColor);
     if (!textSurface) {
@@ -98,9 +97,12 @@ int main(int argc, const char * argv[]) {
         SDL_DestroyWindow(win);
         exit(EXIT_FAILURE);
     }
-    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
+    SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
     SDL_RenderClear(renderer);
+    SDL_BlitSurface(textSurface, nullptr, SDL_GetWindowSurface(win), nullptr);
+    SDL_UpdateWindowSurface(win);
     SDL_RenderPresent(renderer);
+
     
     Vector2f pos(22, 12);
     Vector2f dir(-1, 0);
@@ -116,62 +118,17 @@ int main(int argc, const char * argv[]) {
     bool done = false;
     
     while(!done) {
-        SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
+        SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
         SDL_RenderClear(renderer);
+        std::vector<std::thread> thread_pool;
         for (int x = 0; x < width; x++) {
-            double t = 2 * x / double(width) - 1;
-            Vector2f ray = dir + viewPlane * t;
-            Vector2d mapPos(pos(0), pos(1));
-            Vector2f dDist = ray.cwiseAbs().cwiseInverse();
-            bool hit = false;
-            int side = 0;
-
-            Vector2d stepDir;
-            Vector2f sideDist;
-
-            if (ray(0) < 0) {
-                sideDist(0) = (pos(0) - mapPos(0)) * dDist(0);
-                stepDir(0) = -1;
-            } else {
-                sideDist(0) = (mapPos(0) + 1.0 - pos(0)) * dDist(0);
-                stepDir(0) = 1;
-            }
-            if (ray(1) < 0) {
-                sideDist(1) = (pos(1) - mapPos(1)) * dDist(1);
-                stepDir(1) = -1;
-            } else {
-                sideDist(1) = (mapPos(1) + 1.0 - pos(1)) * dDist(1);
-                stepDir(1) = 1;
-            }
-            while (!hit) {
-                std::ptrdiff_t i;
-                sideDist.minCoeff(&i);
-                side = int(i);
-                sideDist(i) += dDist(i);
-                mapPos(i) += stepDir(i);
-                
-                if (worldMap[int(mapPos(0))][int(mapPos(1))])
-                    hit = true;
-            }
-            double perpWallDist;
-            if (side == 0) perpWallDist = (mapPos(0) - pos(0) + (1 - stepDir(0)) / 2) / ray(0);
-            else           perpWallDist = (mapPos(1) - pos(1) + (1 - stepDir(1)) / 2) / ray(1);
-            
-            int lineHeight = (int)(height / perpWallDist);
-            
-            //calculate lowest and highest pixel to fill in current stripe
-            int drawStart = (height - lineHeight) / 2;
-            if (drawStart < 0) drawStart = 0;
-            int drawEnd = (lineHeight + height) / 2;
-            if (drawEnd >= height) drawEnd = height- 1;
-            
-            int color = 0x8F;
-            if (side == 1)
-                color = 0x4D;
-            
-            SDL_SetRenderDrawColor(renderer, color, color, color, 0x00);
-            SDL_RenderDrawLine(renderer, x, drawStart, x, drawEnd);
+            std::thread t(drawLine, renderer, x, std::ref(pos), std::ref(dir), std::ref(viewPlane));
+            thread_pool.push_back(t);
         }
+        for (std::thread i : thread_pool)
+            i.join();
+        SDL_BlitSurface(textSurface, nullptr, SDL_GetWindowSurface(win), nullptr);
+        SDL_UpdateWindowSurface(win);
         SDL_RenderPresent(renderer);
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -211,4 +168,59 @@ int main(int argc, const char * argv[]) {
     SDL_DestroyRenderer(renderer);
     SDL_Quit();
     return 0;
+}
+
+void drawLine(SDL_Renderer *renderer, int x, Vector2f &pos, Vector2f &dir, Vector2f &viewPlane) {
+    double t = 2 * x / double(width) - 1;
+    Vector2f ray = dir + viewPlane * t;
+    Vector2d mapPos(pos(0), pos(1));
+    Vector2f dDist = ray.cwiseAbs().cwiseInverse();
+    bool hit = false;
+    int side = 0;
+    
+    Vector2d stepDir;
+    Vector2f sideDist;
+    
+    if (ray(0) < 0) {
+        sideDist(0) = (pos(0) - mapPos(0)) * dDist(0);
+        stepDir(0) = -1;
+    } else {
+        sideDist(0) = (mapPos(0) + 1.0 - pos(0)) * dDist(0);
+        stepDir(0) = 1;
+    }
+    if (ray(1) < 0) {
+        sideDist(1) = (pos(1) - mapPos(1)) * dDist(1);
+        stepDir(1) = -1;
+    } else {
+        sideDist(1) = (mapPos(1) + 1.0 - pos(1)) * dDist(1);
+        stepDir(1) = 1;
+    }
+    while (!hit) {
+        std::ptrdiff_t i;
+        sideDist.minCoeff(&i);
+        side = int(i);
+        sideDist(i) += dDist(i);
+        mapPos(i) += stepDir(i);
+        
+        if (worldMap[int(mapPos(0))][int(mapPos(1))])
+            hit = true;
+    }
+    double perpWallDist;
+    if (side == 0) perpWallDist = (mapPos(0) - pos(0) + (1 - stepDir(0)) / 2) / ray(0);
+    else           perpWallDist = (mapPos(1) - pos(1) + (1 - stepDir(1)) / 2) / ray(1);
+    
+    int lineHeight = (int)(height / perpWallDist);
+    
+    //calculate lowest and highest pixel to fill in current stripe
+    int drawStart = (height - lineHeight) / 2;
+    if (drawStart < 0) drawStart = 0;
+    int drawEnd = (lineHeight + height) / 2;
+    if (drawEnd >= height) drawEnd = height- 1;
+    
+    int color = 0x8F;
+    if (side == 1)
+        color = 0x4D;
+    
+    SDL_SetRenderDrawColor(renderer, color, color, color, 0xFF);
+    SDL_RenderDrawLine(renderer, x, drawStart, x, drawEnd);
 }
