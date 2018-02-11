@@ -49,6 +49,9 @@ int worldMap[mapWidth][mapHeight]=
     {1,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
 };
+
+std::mutex mtx_renderer;
+
 void drawLine(SDL_Renderer *renderer, int x, Vector2f &pos, Vector2f &dir, Vector2f &viewPlane);
 
 int main(int argc, const char * argv[]) {
@@ -108,7 +111,7 @@ int main(int argc, const char * argv[]) {
     Vector2f dir(-1, 0);
     Vector2f viewPlane(0, 2.0/3);
 
-    double theta = M_PI / 90;
+    double theta = M_PI / 180;
     Matrix2f rotleft, rotright;
     rotleft << std::cos(theta), -std::sin(theta),
                std::sin(theta), std::cos(theta);
@@ -122,11 +125,9 @@ int main(int argc, const char * argv[]) {
         SDL_RenderClear(renderer);
         std::vector<std::thread> thread_pool;
         for (int x = 0; x < width; x++) {
-            std::thread t(drawLine, renderer, x, std::ref(pos), std::ref(dir), std::ref(viewPlane));
-            thread_pool.push_back(t);
+            thread_pool.push_back(std::thread(drawLine, renderer, x, std::ref(pos), std::ref(dir), std::ref(viewPlane)));
         }
-        for (std::thread i : thread_pool)
-            i.join();
+        std::for_each(thread_pool.begin(), thread_pool.end(), [=] (std::thread &t) {t.join();});
         SDL_BlitSurface(textSurface, nullptr, SDL_GetWindowSurface(win), nullptr);
         SDL_UpdateWindowSurface(win);
         SDL_RenderPresent(renderer);
@@ -220,7 +221,7 @@ void drawLine(SDL_Renderer *renderer, int x, Vector2f &pos, Vector2f &dir, Vecto
     int color = 0x8F;
     if (side == 1)
         color = 0x4D;
-    
+    std::lock_guard<std::mutex> lock(mtx_renderer);
     SDL_SetRenderDrawColor(renderer, color, color, color, 0xFF);
     SDL_RenderDrawLine(renderer, x, drawStart, x, drawEnd);
 }
